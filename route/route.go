@@ -21,4 +21,8 @@ func SetupRoutes(r *gin.Engine, passwordPtr string, shellPathPtr string, _ strin
 	r.POST("/file_send", handleFileSend)             // 处理文件上传
 	r.GET("/file_receive", handleFileReceive)        // 处理文件下载
 	r.GET("/get_current_path", handleGetCurrentPath) // 获取当前工作目录
+	// session 相关
+	r.GET("/session_create", handleSessionCreate)
+	r.GET("/session_list", handleSessionList)
+	r.GET("/session_delete", handleSessionDelete)
 }

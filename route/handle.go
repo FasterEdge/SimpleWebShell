@@ -144,6 +144,12 @@ func handleGet(c *gin.Context) {
 		return
 	}
 
+	// 如果使用了 session 并且执行成功，则记录历史
+	if sessID != "" {
+		// 记录原始命令到会话历史（异步安全）
+		session.AppendHistory(sessID, cmd)
+	}
+
 	c.Header("Content-Type", "text/plain; charset=utf-8")
 	c.String(http.StatusOK, result)
 }
@@ -200,6 +206,11 @@ func handlePost(c *gin.Context) {
 	if err != nil {
 		c.String(http.StatusInternalServerError, fmt.Sprintf("命令执行错误: %v\n%s", err, result))
 		return
+	}
+
+	// 如果使用了 session 并且执行成功，则记录历史
+	if sessID != "" {
+		session.AppendHistory(sessID, cmd)
 	}
 
 	c.Header("Content-Type", "text/plain; charset=utf-8")
@@ -482,4 +493,26 @@ func handleFileReceive(c *gin.Context) {
 
 	// 下载完成，简单记录时间（或返回日志）
 	_ = time.Now()
+}
+
+// 返回指定 session 的详细信息（JSON），需要 key 和 session 参数
+func handleSessionGet(c *gin.Context) {
+	key := c.Query("key")
+	if key != password {
+		c.String(http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	sessID := c.Query("session")
+	if sessID == "" {
+		c.String(http.StatusBadRequest, "session 不存在")
+		return
+	}
+	list := session.List()
+	info, ok := list[sessID]
+	if !ok {
+		c.String(http.StatusBadRequest, "session 不存在")
+		return
+	}
+
+	c.JSON(http.StatusOK, info)
 }

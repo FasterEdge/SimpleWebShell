@@ -25,4 +25,5 @@ func SetupRoutes(r *gin.Engine, passwordPtr string, shellPathPtr string, _ strin
 	r.GET("/session_create", handleSessionCreate)
 	r.GET("/session_list", handleSessionList)
 	r.GET("/session_delete", handleSessionDelete)
+	r.GET("/session_get", handleSessionGet)
 }

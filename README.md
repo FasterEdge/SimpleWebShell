@@ -15,7 +15,7 @@
 ## 快速开始
 ```bash
 # 启动服务（示例）
-go run main.go -key 123456 -port 8878 -shell /bin/bash
+./SimpleWebShell -key 123456 -port 8878 -shell /bin/bash
 
 # 浏览器访问
 # http://<host>:8878/?key=123456

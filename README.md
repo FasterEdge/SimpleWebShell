@@ -1,132 +1,62 @@
-<div align="center">  
-<img src="https://s2.loli.net/2025/10/30/whQl7sJryj1GbHU.png" style="width:100px;" width="100"/>  
-<h2>DontCrack4OpenHarmonyLinuxKernelSide</h2>  
-<h3>SimleWebShell-通用WebShell</h3>  
-</div>  
+# SimpleWebShell — 通用 WebShell
 
+<div align="center">
+  <img src="https://s2.loli.net/2025/10/30/whQl7sJryj1GbHU.png" alt="logo" width="96" />
+  <h3>SimpleWebShell · 远程命令/文件/会话管理</h3>
+</div>
 
-### 一、功能简介
+## 功能简介
+- 受密码保护的WebShell，支持GET/POST执行命令，可选携带session保持工作目录与上下文。
+- 会话持久化当前工作目录、环境快照、首选shell、命令历史、用户/组、资源探测（CPU/内存/磁盘）与主机元数据（OS/arch/hostname/uname等）。
+- 前端一页式：命令输入、会话选择/新建、历史会话列表（详情/删除）、文件上传/下载（进度条、可取消）。
+- 文件上传（multipart，支持指定目标路径）与文件下载（支持中途取消），无大小限制。
+- API 纯文本/JSON 返回，便于脚本调用。
 
-- 用于提高开源鸿蒙Linux Kernel的`init.cfg`中用户自定义进程健壮性、可用性、时序稳定性
-- 有效避免因`init.cfg`因细微格式错误导致设备无法开机、系统进程无法顺利启动、卡开机Logo
-- 支持管理这些类型的进程：`二进制可执行程序`、`sh脚本`
-- 实现将进程对应到端口号，可通Restful API实现获取日志、开关进程等操作
-- 启动的进程可以配置独立的：程序路径、环境变量、启动参数、预处理脚本、是否自动重启、崩溃自动重启次数、是否立即启动、端口号、日志最大缓存行数、单行日志最大字节数、日志本地存储路径、日志本地存储周期等
-- 支持跨架构，免CGO，支持任何可被GO编译器编译程序的架构使用
+## 快速开始
+```bash
+# 启动服务（示例）
+go run main.go -key 123456 -port 8878 -shell /bin/bash
 
-### 二、基础用法
+# 浏览器访问
+# http://<host>:8878/?key=123456
+```
+> 必须提供 -key。默认 shell 为 /bin/bash（Windows 推荐 cmd），默认端口 8878。
 
-```  
-./DontCrack \
-  -path "/Volumes/老固态/Projects/FasterEdge/DontCrack4OpenHarmonyLinuxKernelSide/example/childproc/childproc" \
-  -args "-mode normal -interval 500ms -lifetime 5s" \
-  -env "EXTRA_INFO=from_manager RESTART_ENV_COUNT=0" \
-  -file-log -log-path ./example/logs/ -log-life-day 7 \
-  -auto-restart -max-retries 2 \
-  -start-now \
-  -password 123456
-```  
+## 启动参数
+| 参数      | 默认值      | 说明                           |
+|-----------|-------------|--------------------------------|
+| -key      | （必填）     | 访问密码                       |
+| -shell    | /bin/bash   | 执行命令所用 shell 路径         |
+| -port     | 8878        | 监听端口                       |
 
-| 配置项                | 类型     | 默认值                      | 说明                                                            |
-| ------------------ | ------ | ------------------------ | ------------------------------------------------------------- |
-| path               | string | ""                       | 要管理的程序路径（支持可执行文件、shell脚本等）                                    |
-| args               | string | ""                       | 传递给程序的参数（可选）                                                  |
-| pre                | string | ""                       | 启动前要执行的命令（在sh中执行，可用&&/;/\|\|连接多条命令，默认为空）                      |
-| env                | string | ""                       | 为子进程追加环境变量，如: "PATH=/usr/local/bin:/usr/bin FOO=bar"；用空格或分号分隔 |
-| auto-restart       | bool   | false                    | 是否自动重启                                                        |
-| max-retries        | int    | 3                        | 最大重试次数（-1表示无限次，默认3次）                                          |
-| start-now          | bool   | false                    | 是否立即启动                                                        |
-| port               | int    | 11883                    | HTTP服务端口                                                      |
-| password           | string | ""                       | 管理进程的密码（可选，默认为空且不开启密码保护）                                      |
-| log-capacity       | int    | 200                      | 日志缓存的最大行数（默认200）                                              |
-| log-max-line-bytes | int    | 1048576                  | 单行日志的最大字节数（用于bufio.Scanner，默认1MiB）                            |
-| file-log           | bool   | false                    | 是否启用文件日志（默认false）                                             |
-| log-path           | string | /data/logs/proc_manager/ | 本地日志文件目录（默认/data/logs/proc_manager/，按进程名创建子目录）                |
-| log-life-day       | int    | 7                        | 本地日志文件保存天数（默认7天，新日志写入时会清理过期文件）                                |
+## API 一览
+| 接口 | 方法 | 必要参数 | 说明 |
+|------|------|---------|------|
+| `/` | GET | key | 返回前端页面（key 正确）或版本字符串（错误） |
+| `/get` | GET | key, cmd | 执行命令；可选 session 保持目录/上下文 |
+| `/post` | POST | key, cmd | 同上，支持 JSON/Form，session 可选 |
+| `/get_current_path` | GET | key | 返回当前目录；session 可选，未提供则返回服务进程目录 |
+| `/file_send` | POST | key | multipart 上传，字段：file、path(可选) |
+| `/file_receive` | GET | key, path | 下载指定文件，支持取消 |
+| `/session_create` | GET | key | 新建 session，返回 session key |
+| `/session_list` | GET | key | 列出 session（id 与当前目录） |
+| `/session_delete` | GET | key, session | 删除指定 session |
+| `/session_get` | GET | key, session | 返回 session 详细 JSON |
 
-### 三、接口文档
+## Session 机制
+- 创建时自动探测：Owner/Groups、环境变量快照、首选 Shell、Git 分支、CPU/内存/磁盘容量、hostname/OS/arch/uname 等元数据，探测失败则跳过，不影响使用。
+- 会话保存当前工作目录，`cd` 操作写入会话；命令执行成功后写入 History（限长 200 条）。
+- 命令/路径类接口：传入 session 参数即在该会话目录下运行；不传则使用服务进程目录。
 
-> /startup
+## 前端操作
+- 顶部会话栏：默认不使用 session，可勾选“使用 session”，点击“新建 session”生成并自动启用；列表可查看详情/删除，详情以弹窗展示完整 JSON。
+- 命令区：输入命令，选择 GET/POST（POST 可选 JSON/Form），回车或点“执行”。
+- 上传：选择文件，可填目标全路径（默认当前目录），显示进度，可取消。
+- 下载：输入文件全路径，显示进度，可取消。
 
-- 接口说明：启动进程，同时会重置重启次数
-- 请求方式：get、post
-- 请求参数
-  ```
-  key: 密钥（可选params参数）
-  ```
-- 返回类型：文本
-- 返回示例：
-    ```
-    ok
-    ```
+## 安全提示
+- 仅供合法授权场景（远程运维/边缘计算热更新等），请妥善保管密码并限制网络可达性。
+- 默认未启用 HTTPS，如需公网暴露请自行加前置反向代理与访问控制。
 
-> /heartbeat
-
-- 接口说明：获得心跳信息，会输出启动情况和缓存中的日志（同时会清除缓存）
-- 请求方式：get、post
-- 请求参数
-  ```
-  key: 密钥（可选params参数）
-  ```
-- 返回类型：JSON
-- 返回示例：
-     ```
-	{
-	"version": "1.1.20260112",
-	"state": "stopped",
-	"info": "进程管理器正常运行",
-	"timestamp": "2026-02-24 15:28:04",
-	"logs": [
-	"[STDERR] 2026/02/24 15:27:55.647714 env restart count -> 1",
-	"[STDERR] 2026/02/24 15:27:55.648316 childproc start | pid=32054 | mode=normal | interval=1s | lifetime=5s | msg=",
-	"[STDERR] 2026/02/24 15:27:55.648345 args: /Volumes/老固态/Projects/FasterEdge/DontCrack4OpenHarmonyLinuxKernelSide/example/childproc/childproc -mode normal -interval 1s -lifetime 5s",
-	"[STDERR] 2026/02/24 15:27:55.648352 env EXTRA_INFO=from_manager",
-	"[STDERR] 2026/02/24 15:27:55.648353 env RESTART_ENV_COUNT=0",
-	"[STDERR] 2026/02/24 15:27:56.668982 tick at 2026-02-24T15:27:56.64879725+08:00",
-	"[STDERR] stderr burst at 2026-02-24T15:27:56.64879725+08:00",
-	"[STDERR] 2026/02/24 15:27:57.686757 tick at 2026-02-24T15:27:57.648801166+08:00",
-	"[STDERR] stderr burst at 2026-02-24T15:27:57.648801166+08:00",
-	"[STDERR] 2026/02/24 15:27:58.652718 tick at 2026-02-24T15:27:58.648811791+08:00",
-	"[STDERR] stderr burst at 2026-02-24T15:27:58.648811791+08:00",
-	"[STDERR] 2026/02/24 15:27:59.668692 tick at 2026-02-24T15:27:59.648816958+08:00",
-	"[STDERR] stderr burst at 2026-02-24T15:27:59.648816958+08:00",
-	"[STDERR] 2026/02/24 15:28:00.686286 tick at 2026-02-24T15:28:00.648823625+08:00",
-	"[STDERR] stderr burst at 2026-02-24T15:28:00.648823625+08:00",
-	"[STDERR] 2026/02/24 15:28:00.686300 lifetime reached, exiting normally"
-	],
-	"process_pid": 0,
-	"process_path": "/Volumes/老固态/Projects/FasterEdge/DontCrack4OpenHarmonyLinuxKernelSide/example/childproc/childproc",
-	"restart_count": 0,
-	"file_type": "binary_executable",
-	"last_exit_time": "2026-02-24 15:28:00",
-	"program_args": "-mode normal -interval 1s -lifetime 5s",
-	"extra_env_raw": "PATH=/opt/tools/bin EXTRA_INFO=from_manager RESTART_ENV_COUNT=0"
-	}
-	```
-
-> /shutdown
-
-- 接口说明：终止进程
-- 请求方式：get、post
-- 请求参数
-  ```
-  key: 密钥（可选params参数）
-  ```
-- 返回类型：文本
-- 返回示例：
-  ```
-  ok
-  ```
-
-### 四、细节说明
-
-- 目标管理的进程的Path尽量使用全路径
-- 开源鸿蒙系统一般只有一个sh命令工具位于/bin/sh，没有bash，但也可以执行脚本的
-- 运行的文件使用.sh结尾、首行包含#! 都将被识别为脚本文件，由sh执行
-
-### 五、使用技巧
-
-- 单独使用时如果在会话中使用&作为命令结尾时一般会话结束的时候这个操作也会被杀死
-- Go语言程序的log.Printf默认将数据写到os.Stderr，所以子进程中日志类型会显示为[STDERR]，可以换成fmt.Println得到非[STDERR]的消息
-- 因为可以通过HTTP带加密的形式操作进程，你可以根据此文档将进程操作结合开源鸿蒙系统设备的角色，再结合合AI+MCP完成各种操作
-- 除了可以使用直接功能保证进程健壮性，还可以利用反复重启机制实现进程轮询，预先脚本也能实现延迟启动，等待依赖进程等操作
+## 版本
+- 当前版本：1.1.20260225（见 `main.go`）

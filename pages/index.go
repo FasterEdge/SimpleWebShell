@@ -35,6 +35,11 @@ func GetWebShellHTML() string {
         .session-list { background-color: #252526; border: 1px solid #3e3e42; border-radius: 5px; padding: 12px; }
         .session-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #3e3e42; }
         .session-item:last-child { border-bottom: none; }
+        .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 9999; }
+        .modal.show { display: flex; }
+        .modal-content { background: #1e1e1e; border: 1px solid #3e3e42; border-radius: 6px; padding: 16px; max-width: 80vw; max-height: 80vh; overflow: auto; color: #d4d4d4; box-shadow: 0 4px 20px rgba(0,0,0,0.4); }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .close-btn { background: #3c3c3c; border: 1px solid #6c6c6c; color: #d4d4d4; padding: 4px 10px; border-radius: 3px; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -99,6 +104,16 @@ func GetWebShellHTML() string {
         <div class="file-section">
             <h3>历史会话</h3>
             <div id="sessionList" class="session-list small">暂无 session</div>
+        </div>
+    </div>
+
+    <div id="sessionModal" class="modal" onclick="if(event.target===this) hideSessionModal();">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div id="sessionModalTitle">Session 详情</div>
+                <button class="close-btn" onclick="hideSessionModal()">关闭</button>
+            </div>
+            <pre id="sessionModalBody" style="margin:0; white-space: pre-wrap;"></pre>
         </div>
     </div>
 
@@ -244,10 +259,25 @@ func GetWebShellHTML() string {
                     const obj = JSON.parse(txt);
                     pretty = JSON.stringify(obj, null, 2);
                 } catch (_) {}
-                alert('Session: ' + id + '\n' + pretty);
+                showSessionModal('Session: ' + id, pretty);
             } catch (e) {
                 alert('获取 session 详情出错: ' + e);
             }
+        }
+
+        function showSessionModal(title, body) {
+            const modal = document.getElementById('sessionModal');
+            const t = document.getElementById('sessionModalTitle');
+            const b = document.getElementById('sessionModalBody');
+            if (!modal || !t || !b) return;
+            t.textContent = title;
+            b.textContent = body;
+            modal.classList.add('show');
+        }
+
+        function hideSessionModal() {
+            const modal = document.getElementById('sessionModal');
+            if (modal) modal.classList.remove('show');
         }
 
         async function populateCurrentPath() {

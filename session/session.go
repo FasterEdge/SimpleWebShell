@@ -1,11 +1,18 @@
 package session
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"os"
+	"os/exec"
+	"os/user"
 	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -62,6 +69,14 @@ func New() string {
 	id := hex.EncodeToString(b)
 	cwd, _ := os.Getwd()
 	now := time.Now()
+
+	owner, groups := currentUserInfo()
+	shell := os.Getenv("SHELL")
+	env := envMap()
+	gitBranch := currentGitBranch(cwd)
+	limits := detectLimits(cwd)
+	meta := defaultMetadata(cwd, shell, gitBranch, owner)
+
 	mu.Lock()
 	data[id] = &Info{
 		Dir:         cwd,
@@ -69,9 +84,17 @@ func New() string {
 		UpdatedAt:   now,
 		LastAccess:  now,
 		AccessCount: 0,
-		Env:         map[string]string{},
+		Owner:       owner,
+		Tags:        []string{},
+		Env:         env,
+		Shell:       shell,
 		History:     []string{},
-		Metadata:    map[string]string{},
+		GitBranch:   gitBranch,
+		Mounts:      []string{},
+		Metadata:    meta,
+		ReadOnly:    false,
+		Limits:      limits,
+		Permissions: Permissions{Owner: owner, Groups: groups, Read: true, Write: true, Exec: true},
 	}
 	mu.Unlock()
 	return id
@@ -214,3 +237,132 @@ func AppendHistory(id, cmd string) {
 
 // 引用函数以避免未使用警告（静态检查）。
 var _ = AppendHistory
+
+// detectLimits 尝试获取资源上限，失败则返回0。
+func detectLimits(cwd string) ResourceLimits {
+	return ResourceLimits{
+		CPUCores: float64(runtime.NumCPU()),
+		MemoryMB: detectMemoryMB(),
+		DiskMB:   detectDiskMB(cwd),
+	}
+}
+
+// detectMemoryMB 尝试获取物理内存（MB）。
+func detectMemoryMB() int64 {
+	// 1) /proc/meminfo (Linux)
+	if data, err := os.ReadFile("/proc/meminfo"); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(line, "MemTotal:") {
+				fields := strings.Fields(line)
+				if len(fields) >= 2 {
+					if kb, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
+						return kb / 1024
+					}
+				}
+			}
+		}
+	}
+	// 2) sysctl hw.memsize (macOS/FreeBSD)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sysctl", "-n", "hw.memsize")
+	if out, err := cmd.Output(); err == nil {
+		if bytes, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64); err == nil {
+			return bytes / 1024 / 1024
+		}
+	}
+	return 0
+}
+
+// detectDiskMB 尝试获取路径所在文件系统的容量（MB）。
+func detectDiskMB(path string) int64 {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(path, &st); err == nil {
+		total := uint64(st.Blocks) * uint64(st.Bsize)
+		return int64(total / 1024 / 1024)
+	}
+	return 0
+}
+
+// defaultMetadata 填充通用元数据，失败忽略。
+func defaultMetadata(cwd, shell, gitBranch, owner string) map[string]string {
+	meta := make(map[string]string)
+	if h, err := os.Hostname(); err == nil {
+		meta["hostname"] = h
+	}
+	meta["os"] = runtime.GOOS
+	meta["arch"] = runtime.GOARCH
+	if shell != "" {
+		meta["shell"] = shell
+	}
+	if gitBranch != "" {
+		meta["git_branch"] = gitBranch
+	}
+	if owner != "" {
+		meta["owner"] = owner
+	}
+	meta["cwd"] = cwd
+
+	// uname -a (best-effort)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "uname", "-a")
+	if out, err := cmd.Output(); err == nil {
+		meta["uname"] = strings.TrimSpace(string(out))
+	}
+	return meta
+}
+
+// currentUserInfo 获取当前用户和组信息，失败则返回空字符串/空切片。
+func currentUserInfo() (string, []string) {
+	owner := ""
+	groups := []string{}
+	if u, err := user.Current(); err == nil {
+		if u.Username != "" {
+			owner = u.Username
+		} else if u.Name != "" {
+			owner = u.Name
+		}
+		if gids, err := u.GroupIds(); err == nil {
+			for _, gid := range gids {
+				groups = append(groups, gid)
+			}
+		}
+	}
+	// 补充使用 id -Gn，失败无所谓
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "id", "-Gn")
+	if out, err := cmd.Output(); err == nil {
+		fields := strings.Fields(string(out))
+		if len(fields) > 0 {
+			groups = append(groups, fields...)
+		}
+	}
+	return owner, groups
+}
+
+// envMap 读取环境变量为 map，失败返回空 map。
+func envMap() map[string]string {
+	res := make(map[string]string)
+	for _, e := range os.Environ() {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			res[parts[0]] = parts[1]
+		}
+	}
+	return res
+}
+
+// currentGitBranch 尝试获取当前工作目录的 git 分支，失败返回空字符串。
+func currentGitBranch(dir string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}

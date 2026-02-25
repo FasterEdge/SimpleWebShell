@@ -63,11 +63,12 @@ func GetWebShellHTML() string {
             border: 1px solid #3e3e42;
             border-radius: 3px;
             padding: 15px;
-            min-height: 300px;
+            height: 500px; /* 固定高度为原来的 max-height，内部使用 overflow-y 实现滚动 */
             white-space: pre-wrap;
             font-size: 14px;
             overflow-y: auto;
-            max-height: 500px;
+            margin-bottom: 24px; /* 与下方 file-section 间距统一且更大 */
+            /* max-height: 500px;  已改为固定高度 */
         }
         .method-select, .format-select {
             background-color: #3c3c3c;
@@ -82,7 +83,8 @@ func GetWebShellHTML() string {
             border: 1px solid #3e3e42;
             border-radius: 5px;
             padding: 20px;
-            margin-bottom: 20px;
+            margin-top: 0; /* 取消顶部外边距，间距由上方元素的 margin-bottom 决定，保证一致 */
+            margin-bottom: 24px; /* 增大并与上方输出框间距统一 */
         }
         .progress {
             width: 100%;
@@ -124,6 +126,11 @@ func GetWebShellHTML() string {
             </div>
         </div>
 
+        <div class="output" id="output">欢迎使用 SimpleWebShell
+请在上方输入框中输入要执行的命令，然后点击执行按钮或按回车键。
+支持GET请求和POST请求（JSON/Form格式）。
+        </div>
+
         <div class="file-section">
             <h3>文件上传</h3>
             <div class="input-group">
@@ -144,11 +151,6 @@ func GetWebShellHTML() string {
             </div>
             <div class="small" id="downloadStatus">未开始</div>
             <div class="progress"><div id="downloadProgress"></div></div>
-        </div>
-
-        <div class="output" id="output">欢迎使用 SimpleWebShell
-请在上方输入框中输入要执行的命令，然后点击执行按钮或按回车键。
-支持GET请求和POST请求（JSON/Form格式）。
         </div>
     </div>
 

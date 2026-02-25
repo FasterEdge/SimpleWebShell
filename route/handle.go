@@ -22,7 +22,7 @@ func handleRoot(c *gin.Context) {
 	key := c.Query("key")
 	if key != password {
 		// 密钥不正确，只显示基本信息
-		c.String(http.StatusOK, "SimpleWebshell 1.1.20260225 By FasterEdge")
+		c.String(http.StatusOK, "SimpleWebshell 1.1.20225 By FasterEdge")
 		return
 	}
 
@@ -173,7 +173,7 @@ func handleFileSend(c *gin.Context) {
 		outPath := filename
 		outFile, ferr := os.Create(outPath)
 		if ferr != nil {
-			part.Close()
+			_ = part.Close()
 			for _, f := range savedFiles {
 				_ = os.Remove(f)
 			}
@@ -190,7 +190,7 @@ func handleFileSend(c *gin.Context) {
 			select {
 			case <-ctx.Done():
 				// 取消，关闭文件并删除部分写入的文件
-				outFile.Close()
+				_ = outFile.Close()
 				_ = os.Remove(outPath)
 				c.String(http.StatusRequestTimeout, "上传已取消")
 				return
@@ -200,7 +200,7 @@ func handleFileSend(c *gin.Context) {
 			n, rerr := part.Read(buf)
 			if n > 0 {
 				if _, werr := outFile.Write(buf[:n]); werr != nil {
-					outFile.Close()
+					_ = outFile.Close()
 					_ = os.Remove(outPath)
 					c.String(http.StatusInternalServerError, fmt.Sprintf("写入文件失败: %v", werr))
 					return
@@ -210,14 +210,14 @@ func handleFileSend(c *gin.Context) {
 				if rerr == io.EOF {
 					break
 				}
-				outFile.Close()
+				_ = outFile.Close()
 				_ = os.Remove(outPath)
 				c.String(http.StatusInternalServerError, fmt.Sprintf("读取上传数据失败: %v", rerr))
 				return
 			}
 		}
 
-		outFile.Close()
+		_ = outFile.Close()
 		// 仅处理第一个文件（如果有多个文件部分，可继续循环）
 		break
 	}
@@ -252,7 +252,7 @@ func handleFileReceive(c *gin.Context) {
 		c.String(http.StatusNotFound, fmt.Sprintf("打开文件失败: %v", err))
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// 获取文件信息
 	fi, err := f.Stat()

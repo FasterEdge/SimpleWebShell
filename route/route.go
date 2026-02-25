@@ -7,14 +7,12 @@ import (
 var (
 	password  string
 	shellPath string
-	port      string
 )
 
 func SetupRoutes(r *gin.Engine, passwordPtr string, shellPathPtr string, portPtr string) {
 	// 保存传入的配置到包作用域变量，供handler使用
 	password = passwordPtr
 	shellPath = shellPathPtr
-	port = portPtr
 
 	// 设置路由
 	r.GET("/", handleRoot)                    // 欢迎界面

@@ -1,7 +1,7 @@
 # SimpleWebShell — 通用 WebShell
 
 <div align="center">
-  <img src="https://s2.loli.net/2025/10/30/whQl7sJryj1GbHU.png" alt="logo" width="96" />
+  <img src="https://imagesandfont.s3.bitiful.net/icon/Logo.png?no-wait=on" alt="logo" width="96" />
   <h3>SimpleWebShell · 远程命令/文件/会话管理</h3>
 </div>
 

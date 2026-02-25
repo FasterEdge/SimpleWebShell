@@ -135,6 +135,7 @@ func GetWebShellHTML() string {
             <h3>文件上传</h3>
             <div class="input-group">
                 <input type="file" id="uploadFile">
+                <input type="text" id="uploadTarget" placeholder="目标路径（默认当前目录）" style="margin-left:10px;"> <!-- 新增：上传目标路径 -->
                 <button id="uploadBtn">上传</button>
                 <button id="cancelUploadBtn">取消</button>
             </div>
@@ -177,6 +178,23 @@ func GetWebShellHTML() string {
             toggleFormatSelect();
             setupUpload();
             setupDownload();
+            populateCurrentPath(); // 新增：获取并填充当前路径到上传/下载输入
+        }
+
+        async function populateCurrentPath() {
+            const key = new URLSearchParams(window.location.search).get('key');
+            if (!key) return;
+            try {
+                const resp = await fetch('/get_current_path?key=' + encodeURIComponent(key));
+                if (!resp.ok) return;
+                const dir = await resp.text();
+                const up = document.getElementById('uploadTarget');
+                const down = document.getElementById('downloadPath');
+                if (up && !up.value) up.value = dir;
+                if (down && !down.value) down.value = dir;
+            } catch (e) {
+                // ignore
+            }
         }
 
         function executeCommand() {
@@ -272,6 +290,8 @@ func GetWebShellHTML() string {
                     const form = new FormData();
                     form.append('file', file, file.name);
                     form.append('key', key);
+                    const target = document.getElementById('uploadTarget');
+                    if (target && target.value) form.append('path', target.value);
 
                     const resp = await fetch('/file_send?key=' + encodeURIComponent(key), {
                         method: 'POST',
@@ -326,6 +346,8 @@ func GetWebShellHTML() string {
                 const form = new FormData();
                 form.append('file', file, file.name);
                 form.append('key', key);
+                const target = document.getElementById('uploadTarget');
+                if (target && target.value) form.append('path', target.value);
 
                 xhr.upload.onprogress = function(e) {
                     if (e.lengthComputable) {

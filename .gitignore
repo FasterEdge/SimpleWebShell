@@ -1,0 +1,57 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.*
+go.work
+go.work.sum
+
+# Build artifacts
+/SimpleWebShell
+/SimpleWebShell.exe
+
+# ============================================
+# OS / Editor / IDE 噪音
+# ============================================
+
+# macOS Finder
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows Explorer
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+
+# Linux trash
+.Trash-*
+
+# Editors / IDE
+*~
+*.swp
+*.swo
+*.bak
+*.tmp
+.vscode/
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+
+# Logs / runtime
+*.log
+logs/
+tmp/
+temp/
+
+# Git worktrees
+.worktrees/

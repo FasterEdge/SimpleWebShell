@@ -23,7 +23,7 @@ func handleRoot(c *gin.Context) {
 	key := c.Query("key")
 	if key != password {
 		// 密钥不正确，只显示基本信息
-		c.String(http.StatusOK, "SimpleWebshell 1.1.20225 By FasterEdge")
+		c.String(http.StatusOK, "SimpleWebshell 1.0.20260826 By FasterEdge")
 		return
 	}
 

@@ -23,7 +23,7 @@ func init() {
 }
 
 func main() {
-	version := "1.1.20260225" // 当前系统的版本
+	version := "1.0.20260826" // 当前系统的版本
 	flag.Parse()
 
 	// 检查必需参数

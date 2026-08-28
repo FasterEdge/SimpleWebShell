@@ -3,6 +3,7 @@ package route
 import (
 	"SimpleWebShell/pages"
 	"SimpleWebShell/session"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -268,22 +269,39 @@ func executeCommandWithSession(sessID, cmdStr string) (string, error) {
 	return runShellInDir(cmdStr, curDir)
 }
 
+// runShellInDir 在指定目录执行 shell 命令。
+// 安全边界：命令执行带超时(默认60s)，输出上限 1MiB，
+// 防止挂起命令永久占用 handler、无界输出耗尽内存。
+const (
+	shellCommandTimeout = 60 * time.Second
+	shellOutputLimit    = 1 << 20 // 1MiB
+)
+
 func runShellInDir(cmdStr, dir string) (string, error) {
-	var cmd *exec.Cmd
-
-	// 根据shell类型使用不同的参数
+	// 根据shell类型选择参数形式
 	shellLower := strings.ToLower(shellPath)
-	if strings.Contains(shellLower, "cmd") || strings.Contains(shellLower, "cmd.exe") {
-		cmd = exec.Command(shellPath, "/c", cmdStr)
-	} else if strings.Contains(shellLower, "powershell") || strings.Contains(shellLower, "pwsh") {
-		cmd = exec.Command(shellPath, "-Command", cmdStr)
-	} else { // 默认假设为类Unix shell
-		cmd = exec.Command(shellPath, "-c", cmdStr)
-	}
 
+	// 超时控制：到时强杀命令，避免 handler 永久阻塞
+	ctx, cancel := context.WithTimeout(context.Background(), shellCommandTimeout)
+	defer cancel()
+	var cmd *exec.Cmd
+	if strings.Contains(shellLower, "cmd") || strings.Contains(shellLower, "cmd.exe") {
+		cmd = exec.CommandContext(ctx, shellPath, "/c", cmdStr)
+	} else if strings.Contains(shellLower, "powershell") || strings.Contains(shellLower, "pwsh") {
+		cmd = exec.CommandContext(ctx, shellPath, "-Command", cmdStr)
+	} else {
+		cmd = exec.CommandContext(ctx, shellPath, "-c", cmdStr)
+	}
 	cmd.Dir = dir
 
 	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return string(output) + "\n[SimpleWebShell] 命令超时(60s)已终止", err
+	}
+	if len(output) > shellOutputLimit {
+		output = output[:shellOutputLimit]
+		return string(output) + "\n[SimpleWebShell] 输出超过 1MiB 已截断", err
+	}
 	return string(output), err
 }
 

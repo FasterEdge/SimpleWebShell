@@ -1,3 +1,4 @@
+// FasterEdge 开源项目 · https://github.com/FasterEdge · https://gitee.com/FasterEdge
 package main
 
 // https://github.com/FasterEdge/SimpleWebShell

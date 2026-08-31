@@ -7,7 +7,7 @@ func GetWebShellHTML() string {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SimpleWebShell 1.0.20260826</title>
+    <title>SimpleWebShell 1.0.20260831</title>
     <style>
         body {
             font-family: 'Courier New', monospace;
@@ -44,7 +44,7 @@ func GetWebShellHTML() string {
 </head>
 <body>
     <div class="container">
-        <h1>SimpleWebShell 1.0.20260826 By FasterEdge</h1>
+        <h1>SimpleWebShell 1.0.20260831 By FasterEdge</h1>
 
         <div class="session-section">
             <div class="input-group no-gap" style="align-items:center;">

@@ -43,7 +43,7 @@ jobs:
     - uses: actions/upload-artifact@v4
       with:
         name: 'simple-web-shell-${{ matrix.target }}'
-        path: 'simple-web-shell-${{ matrix.target }}.tar.gz'
+        path: '${{ github.workspace }}/simple-web-shell-${{ matrix.target }}.*'
         if-no-files-found: 'error'
         retention-days: 1
 

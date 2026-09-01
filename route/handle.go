@@ -4,10 +4,12 @@ import (
 	"SimpleWebShell/pages"
 	"SimpleWebShell/session"
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,11 +20,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// secureCompare 常量时间比较两个字符串，避免时序攻击泄露密码信息。
+func secureCompare(a, b string) bool {
+	ha := sha256.Sum256([]byte(a))
+	hb := sha256.Sum256([]byte(b))
+	return subtle.ConstantTimeCompare(ha[:], hb[:]) == 1
+}
+
 // 处理根路径
 func handleRoot(c *gin.Context) {
 	// 检查密钥
 	key := c.Query("key")
-	if key != password {
+	if !secureCompare(key, password) {
 		// 密钥不正确，只显示基本信息
 		c.String(http.StatusOK, "SimpleWebshell 1.0.20260831 By FasterEdge")
 		return
@@ -36,7 +45,7 @@ func handleRoot(c *gin.Context) {
 // session 创建
 func handleSessionCreate(c *gin.Context) {
 	key := c.Query("key")
-	if key != password {
+	if !secureCompare(key, password) {
 		c.String(http.StatusUnauthorized, "Unauthorized")
 		return
 	}
@@ -47,7 +56,7 @@ func handleSessionCreate(c *gin.Context) {
 // session 列表
 func handleSessionList(c *gin.Context) {
 	key := c.Query("key")
-	if key != password {
+	if !secureCompare(key, password) {
 		c.String(http.StatusUnauthorized, "Unauthorized")
 		return
 	}
@@ -63,7 +72,7 @@ func handleSessionList(c *gin.Context) {
 // session 删除
 func handleSessionDelete(c *gin.Context) {
 	key := c.Query("key")
-	if key != password {
+	if !secureCompare(key, password) {
 		c.String(http.StatusUnauthorized, "Unauthorized")
 		return
 	}
@@ -82,7 +91,7 @@ func handleSessionDelete(c *gin.Context) {
 // 返回当前工作目录（带 key + session 验证）
 func handleGetCurrentPath(c *gin.Context) {
 	key := c.Query("key")
-	if key != password {
+	if !secureCompare(key, password) {
 		c.String(http.StatusUnauthorized, "Unauthorized")
 		return
 	}
@@ -113,7 +122,7 @@ func handleGetCurrentPath(c *gin.Context) {
 func handleGet(c *gin.Context) {
 	// 验证密钥
 	key := c.Query("key")
-	if key != password {
+	if !secureCompare(key, password) {
 		c.String(http.StatusUnauthorized, "Unauthorized")
 		return
 	}
@@ -124,17 +133,11 @@ func handleGet(c *gin.Context) {
 		return
 	}
 
-	// 获取命令并进行URL解码
-	cmdEncoded := c.Query("cmd")
-	if cmdEncoded == "" {
+	// 获取命令（Gin 的 c.Query 已做 URL 解码，勿再二次解码，
+	// 否则含字面 % 的命令会被破坏或报"解码错误"）
+	cmd := c.Query("cmd")
+	if cmd == "" {
 		c.String(http.StatusBadRequest, "缺少cmd参数")
-		return
-	}
-
-	// URL解码命令参数
-	cmd, err := url.QueryUnescape(cmdEncoded)
-	if err != nil {
-		c.String(http.StatusBadRequest, fmt.Sprintf("命令参数解码错误: %v", err))
 		return
 	}
 
@@ -186,7 +189,7 @@ func handlePost(c *gin.Context) {
 	}
 
 	// 验证密钥
-	if key != password {
+	if !secureCompare(key, password) {
 		c.String(http.StatusUnauthorized, "Unauthorized")
 		return
 	}
@@ -237,15 +240,17 @@ func executeCommandWithSession(sessID, cmdStr string) (string, error) {
 	}
 
 	trim := strings.TrimSpace(cmdStr)
-	if strings.HasPrefix(trim, "cd") {
+	// 仅当命令以 "cd" 作为独立词开头时才走会话内目录切换，
+	// 避免把 cdecl、cdrecord 等以 cd 开头的命令误判为目录切换
+	if trim == "cd" || strings.HasPrefix(trim, "cd ") || strings.HasPrefix(trim, "cd\t") {
 		parts := strings.SplitN(cmdStr, "&&", 2)
 		first := strings.TrimSpace(parts[0])
 		target := strings.TrimSpace(strings.TrimPrefix(first, "cd"))
 		if target == "" {
-			target = os.Getenv("HOME")
+			target = homeDir()
 		}
 		if strings.HasPrefix(target, "~") {
-			target = filepath.Join(os.Getenv("HOME"), strings.TrimPrefix(target, "~"))
+			target = filepath.Join(homeDir(), strings.TrimPrefix(target, "~"))
 		}
 		var newdir string
 		if filepath.IsAbs(target) {
@@ -267,6 +272,14 @@ func executeCommandWithSession(sessID, cmdStr string) (string, error) {
 	}
 
 	return runShellInDir(cmdStr, curDir)
+}
+
+// homeDir 跨平台获取当前用户主目录，避免 Windows 无 HOME 环境变量时返回空。
+func homeDir() string {
+	if h, err := os.UserHomeDir(); err == nil && h != "" {
+		return h
+	}
+	return os.Getenv("HOME")
 }
 
 // runShellInDir 在指定目录执行 shell 命令。
@@ -306,11 +319,13 @@ func runShellInDir(cmdStr, dir string) (string, error) {
 }
 
 // 处理文件上传
-// 上传使用 multipart/form-data，支持 path 字段（目标全路径或目录）
+// 上传使用 multipart/form-data，支持 path 字段（目标全路径或目录）。
+// 实现与字段顺序无关：先流式缓冲所有文件到临时文件，解析完所有表单字段（含 path）后再落盘，
+// 避免前端将 path 字段排在 file 之后时目标路径失效的暗病；同时支持一次上传多个文件。
 func handleFileSend(c *gin.Context) {
 	// 优先从 query 获取 key
 	key := c.Query("key")
-	if key != password {
+	if !secureCompare(key, password) {
 		c.String(http.StatusUnauthorized, "Unauthorized")
 		return
 	}
@@ -323,29 +338,38 @@ func handleFileSend(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	var savedFiles []string
 	var destPath string // 来自表单的目标路径（可以是目录或完整路径）
+	type pendingFile struct {
+		tmpPath  string
+		filename string
+	}
+	var pending []pendingFile
+	var savedFiles []string
+	// cleanup 清理临时文件与已写入的目标文件
+	cleanup := func() {
+		for _, pf := range pending {
+			_ = os.Remove(pf.tmpPath)
+		}
+		for _, f := range savedFiles {
+			_ = os.Remove(f)
+		}
+	}
 	defer func() {
-		// 在处理完毕若发生 panic/错误，清理已写入的临时文件（如果需要）
+		// 在处理完毕若发生 panic/错误，清理临时文件
 		if r := recover(); r != nil {
-			for _, f := range savedFiles {
-				_ = os.Remove(f)
-			}
+			cleanup()
 			c.String(http.StatusInternalServerError, fmt.Sprintf("上传处理发生异常: %v", r))
 		}
 	}()
 
-	// 处理 multipart 各部分，支持普通字段和文件字段
+	// 处理 multipart 各部分：表单字段即时记录，文件字段缓冲到临时文件
 	for {
 		part, perr := mr.NextPart()
 		if perr == io.EOF {
 			break
 		}
 		if perr != nil {
-			// 读取错误
-			for _, f := range savedFiles {
-				_ = os.Remove(f)
-			}
+			cleanup()
 			c.String(http.StatusInternalServerError, fmt.Sprintf("读取 multipart 部分失败: %v", perr))
 			return
 		}
@@ -362,19 +386,65 @@ func handleFileSend(c *gin.Context) {
 			continue
 		}
 
-		// 文件字段
+		// 文件字段：先写入临时文件，避免依赖 path 字段的到达顺序
 		filename := filepath.Base(part.FileName())
+		tmp, terr := os.CreateTemp("", "sws-upload-*")
+		if terr != nil {
+			_ = part.Close()
+			cleanup()
+			c.String(http.StatusInternalServerError, fmt.Sprintf("创建临时文件失败: %v", terr))
+			return
+		}
+		buf := make([]byte, 32*1024)
+		for {
+			// 检查客户端是否已经取消
+			select {
+			case <-ctx.Done():
+				_ = tmp.Close()
+				_ = os.Remove(tmp.Name())
+				cleanup()
+				c.String(http.StatusRequestTimeout, "上传已取消")
+				return
+			default:
+			}
 
+			n, rerr := part.Read(buf)
+			if n > 0 {
+				if _, werr := tmp.Write(buf[:n]); werr != nil {
+					_ = tmp.Close()
+					_ = os.Remove(tmp.Name())
+					cleanup()
+					c.String(http.StatusInternalServerError, fmt.Sprintf("写入临时文件失败: %v", werr))
+					return
+				}
+			}
+			if rerr != nil {
+				if rerr == io.EOF {
+					break
+				}
+				_ = tmp.Close()
+				_ = os.Remove(tmp.Name())
+				cleanup()
+				c.String(http.StatusInternalServerError, fmt.Sprintf("读取上传数据失败: %v", rerr))
+				return
+			}
+		}
+		_ = tmp.Close()
+		pending = append(pending, pendingFile{tmpPath: tmp.Name(), filename: filename})
+	}
+
+	// 所有字段已解析完毕，此时 destPath 已确定，将临时文件移动到最终位置
+	for _, pf := range pending {
 		// 计算输出路径：如果表单指定了 destPath
 		var outPath string
 		if destPath == "" {
-			outPath = filename
+			outPath = pf.filename
 		} else {
 			// 如果 destPath 指向一个已存在的目录或以路径分隔符结尾，则把文件名追加到目录
 			if fi, err := os.Stat(destPath); err == nil && fi.IsDir() {
-				outPath = filepath.Join(destPath, filename)
+				outPath = filepath.Join(destPath, pf.filename)
 			} else if strings.HasSuffix(destPath, string(os.PathSeparator)) {
-				outPath = filepath.Join(destPath, filename)
+				outPath = filepath.Join(destPath, pf.filename)
 			} else {
 				// 否则把 destPath 当作完整文件路径（覆盖或创建）
 				outPath = destPath
@@ -386,60 +456,50 @@ func handleFileSend(c *gin.Context) {
 			_ = os.MkdirAll(dir, 0755)
 		}
 
-		outFile, ferr := os.Create(outPath)
-		if ferr != nil {
-			_ = part.Close()
-			for _, f := range savedFiles {
-				_ = os.Remove(f)
-			}
-			c.String(http.StatusInternalServerError, fmt.Sprintf("创建文件失败: %v", ferr))
+		if err := moveFile(pf.tmpPath, outPath); err != nil {
+			cleanup()
+			c.String(http.StatusInternalServerError, fmt.Sprintf("保存文件失败: %v", err))
 			return
 		}
-
 		savedFiles = append(savedFiles, outPath)
-
-		// 流式拷贝，支持取消
-		buf := make([]byte, 32*1024)
-		for {
-			// 检查客户端是否已经取消
-			select {
-			case <-ctx.Done():
-				// 取消，关闭文件并删除部分写入的文件
-				_ = outFile.Close()
-				_ = os.Remove(outPath)
-				c.String(http.StatusRequestTimeout, "上传已取消")
-				return
-			default:
-			}
-
-			n, rerr := part.Read(buf)
-			if n > 0 {
-				if _, werr := outFile.Write(buf[:n]); werr != nil {
-					_ = outFile.Close()
-					_ = os.Remove(outPath)
-					c.String(http.StatusInternalServerError, fmt.Sprintf("写入文件失败: %v", werr))
-					return
-				}
-			}
-			if rerr != nil {
-				if rerr == io.EOF {
-					break
-				}
-				_ = outFile.Close()
-				_ = os.Remove(outPath)
-				c.String(http.StatusInternalServerError, fmt.Sprintf("读取上传数据失败: %v", rerr))
-				return
-			}
-		}
-
-		_ = outFile.Close()
-		// 如果只需要处理第一个文件则可以 break，否则继续
-		break
 	}
 
 	// 上传完成
 	c.Header("Content-Type", "application/json; charset=utf-8")
-	c.String(http.StatusOK, fmt.Sprintf(`{"status":"ok","files":%q,"message":"上传完成"}`, savedFiles))
+	respBody, _ := json.Marshal(map[string]any{
+		"status":  "ok",
+		"files":   savedFiles,
+		"message": "上传完成",
+	})
+	c.String(http.StatusOK, string(respBody))
+}
+
+// moveFile 将 src 移动到 dst。跨文件系统（如临时目录与目标目录不同挂载点）时回退为拷贝+删除。
+func moveFile(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	}
+	// 回退：拷贝后删除源文件，兼容跨设备/Windows 行为
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		_ = os.Remove(dst)
+		return err
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(dst)
+		return err
+	}
+	_ = os.Remove(src)
+	return nil
 }
 
 // 处理文件下载
@@ -447,7 +507,7 @@ func handleFileSend(c *gin.Context) {
 func handleFileReceive(c *gin.Context) {
 	// 验证密钥
 	key := c.Query("key")
-	if key != password {
+	if !secureCompare(key, password) {
 		c.String(http.StatusUnauthorized, "Unauthorized")
 		return
 	}
@@ -516,7 +576,7 @@ func handleFileReceive(c *gin.Context) {
 // 返回指定 session 的详细信息（JSON），需要 key 和 session 参数
 func handleSessionGet(c *gin.Context) {
 	key := c.Query("key")
-	if key != password {
+	if !secureCompare(key, password) {
 		c.String(http.StatusUnauthorized, "Unauthorized")
 		return
 	}

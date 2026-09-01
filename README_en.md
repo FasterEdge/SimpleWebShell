@@ -67,6 +67,7 @@ openssl req -x509 -newkey rsa:2048 -nodes \
 - On creation, auto-probes: Owner/Groups, environment variable snapshot, preferred Shell, Git branch, CPU/memory/disk capacity, hostname/OS/arch/uname metadata etc.; probing failures are skipped and do not affect usage.
 - The session saves the current working directory; `cd` operations are written to the session; successful commands are appended to History (capped at 200 entries).
 - Command/path endpoints: passing the session parameter runs in that session's directory; otherwise the service process directory is used.
+- Auto-cleanup: sessions idle for more than 24 hours are removed by a background janitor, and the total session count is capped at 1000 (beyond that, the least recently used sessions are evicted), preventing unbounded memory growth on long-running servers; active sessions are unaffected.
 
 ### 6. Frontend Operations
 - Top session bar: by default no session is used; check "use session", click "new session" to create and auto-enable one; the list allows viewing details/deleting; details are shown in a popup with full JSON.

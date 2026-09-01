@@ -62,8 +62,24 @@ func main() {
 	// 设置Gin为发布模式
 	gin.SetMode(gin.ReleaseMode)
 
-	// 创建Gin路由器
-	r := gin.Default()
+	// 创建Gin路由器。
+	// 注意：不使用 gin.Default()，因为其默认日志会打印完整 URL（含 ?key=密码），
+	// 导致密码泄露到服务日志。改用 gin.New() + 自定义日志（仅打印路径，不含查询串）。
+	r := gin.New()
+	r.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
+		// 仅打印路径 path，不含 RawQuery，避免 key=密码 泄露到日志
+		// （gin v1.12 的 param.Path 会拼上查询串，故用 Request.URL.Path）
+		path := param.Request.URL.Path
+		return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %-7s %s\n",
+			param.TimeStamp.Format("2006/01/02 - 15:04:05"),
+			param.StatusCode,
+			param.Latency,
+			param.ClientIP,
+			param.Method,
+			path,
+		)
+	}))
+	r.Use(gin.Recovery())
 
 	// 设置路由
 	route.SetupRoutes(r, *password, *shellPath, *port)

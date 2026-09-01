@@ -9,6 +9,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -62,6 +63,61 @@ var (
 
 const defaultHistoryLimit = 200
 
+// 会话清理参数：防止长期运行下会话无限累积占用内存。
+const (
+	// sessionIdleTTL 会话超过该空闲时长（无任何访问）即被后台清理
+	sessionIdleTTL = 24 * time.Hour
+	// sessionMaxCount 会话数量上限，超出后清理最久未访问的会话
+	sessionMaxCount = 1000
+	// cleanupInterval 后台清理协程的扫描间隔
+	cleanupInterval = 30 * time.Minute
+)
+
+// StartCleaner 启动后台会话清理协程（幂等，可多次调用）。
+// 仅清理空闲超时或超过数量上限的会话，不影响活跃会话。
+func StartCleaner() {
+	cleanerOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(cleanupInterval)
+			defer ticker.Stop()
+			for range ticker.C {
+				prune()
+			}
+		}()
+	})
+}
+
+var cleanerOnce sync.Once
+
+// prune 清理空闲超时或超出上限的会话。
+func prune() {
+	now := time.Now()
+	mu.Lock()
+	defer mu.Unlock()
+
+	for id, info := range data {
+		if now.Sub(info.LastAccess) > sessionIdleTTL {
+			delete(data, id)
+		}
+	}
+
+	// 仍超过上限则按最近访问时间清理最久未用的会话
+	if len(data) > sessionMaxCount {
+		type kv struct {
+			id   string
+			last time.Time
+		}
+		oldest := make([]kv, 0, len(data))
+		for id, info := range data {
+			oldest = append(oldest, kv{id: id, last: info.LastAccess})
+		}
+		sort.Slice(oldest, func(i, j int) bool { return oldest[i].last.Before(oldest[j].last) })
+		for i := 0; i < len(oldest)-sessionMaxCount; i++ {
+			delete(data, oldest[i].id)
+		}
+	}
+}
+
 // New 创建一个新的 session，初始工作目录为服务器当前工作目录。
 func New() string {
 	b := make([]byte, 16)
@@ -69,6 +125,9 @@ func New() string {
 	id := hex.EncodeToString(b)
 	cwd, _ := os.Getwd()
 	now := time.Now()
+
+	// 确保后台清理协程在首次创建会话时启动（幂等）
+	StartCleaner()
 
 	owner, groups := currentUserInfo()
 	shell := os.Getenv("SHELL")

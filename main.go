@@ -32,7 +32,7 @@ func init() {
 }
 
 func main() {
-	version := "1.0.20260831" // 当前系统的版本
+	version := "1.0.20260901" // 当前系统的版本
 	flag.Parse()
 
 	// 检查必需参数

@@ -1,0 +1,23 @@
+name: 'Docker 镜像构建'
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: '构建 Docker 镜像'
+      run: |
+        docker build -t simple-web-shell .
+    - name: '导出并上传镜像工件'
+      run: |
+        docker save simple-web-shell | gzip > simple-web-shell-image.tar.gz
+    - uses: actions/upload-artifact@v4
+      with:
+        name: 'simple-web-shell-docker-image-${{ github.ref_name }}'
+        path: 'simple-web-shell-image.tar.gz'
+        if-no-files-found: 'warn'
+        retention-days: 14

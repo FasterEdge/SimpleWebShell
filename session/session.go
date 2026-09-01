@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -334,14 +333,7 @@ func detectMemoryMB() int64 {
 }
 
 // detectDiskMB 尝试获取路径所在文件系统的容量（MB）。
-func detectDiskMB(path string) int64 {
-	var st syscall.Statfs_t
-	if err := syscall.Statfs(path, &st); err == nil {
-		total := uint64(st.Blocks) * uint64(st.Bsize)
-		return int64(total / 1024 / 1024)
-	}
-	return 0
-}
+// 平台相关实现见 disk_unix.go / disk_windows.go。
 
 // defaultMetadata 填充通用元数据，失败忽略。
 func defaultMetadata(cwd, shell, gitBranch, owner string) map[string]string {

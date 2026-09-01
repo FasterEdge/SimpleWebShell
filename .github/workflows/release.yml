@@ -1,0 +1,72 @@
+name: '跨平台 Release 打包'
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: '构建 ${{ matrix.target }}'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-amd64,   goos: linux,   goarch: amd64, ext: ''   }
+          - { target: linux-arm64,   goos: linux,   goarch: arm64, ext: ''   }
+          - { target: darwin-amd64,  goos: darwin,  goarch: amd64, ext: ''   }
+          - { target: darwin-arm64,  goos: darwin,  goarch: arm64, ext: ''   }
+          - { target: windows-amd64, goos: windows, goarch: amd64, ext: .exe }
+          - { target: windows-arm64, goos: windows, goarch: arm64, ext: .exe }
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+    - name: '编译 ${{ matrix.target }}'
+      run: |
+        mkdir -p dist
+        CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+          go build -trimpath -ldflags="-s -w" -o dist/simple-web-shell${{ matrix.ext }} .
+    - name: '打包'
+      run: |
+        cd dist
+        if [ "${{ matrix.goos }}" = "windows" ]; then
+          zip -qr ../simple-web-shell-${{ matrix.target }}.zip simple-web-shell.exe
+        else
+          tar czf ../simple-web-shell-${{ matrix.target }}.tar.gz simple-web-shell
+        fi
+    - uses: actions/upload-artifact@v4
+      with:
+        name: 'simple-web-shell-${{ matrix.target }}'
+        path: 'simple-web-shell-${{ matrix.target }}.tar.gz'
+        if-no-files-found: 'error'
+        retention-days: 1
+
+  release:
+    name: '发布 GitHub Release'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+        merge-multiple: true
+    - name: '整理产物'
+      run: |
+        mkdir -p release
+        find artifacts -type f | while read -r f; do
+          case "$f" in
+            *.tar.gz|*.zip) cp "$f" release/ ;;
+          esac
+        done
+    - name: '上传到 Release'
+      uses: softprops/action-gh-release@v2
+      with:
+        files: 'release/*'
+        generate_release_notes: true
+        fail_on_unmatched_files: false

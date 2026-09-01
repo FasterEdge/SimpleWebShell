@@ -4,9 +4,11 @@ package main
 // https://github.com/FasterEdge/SimpleWebShell
 import (
 	"SimpleWebShell/route"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,12 +17,18 @@ var (
 	password  *string
 	shellPath *string
 	port      *string
+	useTLS    *bool
+	certFile  *string
+	keyFile   *string
 )
 
 func init() {
 	password = flag.String("key", "", "密码 (必需)")
 	shellPath = flag.String("shell", "/bin/bash", "Shell路径 (Windows默认: cmd, Linux默认: /bin/bash)")
 	port = flag.String("port", "8878", "监听端口 (默认: 8878)")
+	useTLS = flag.Bool("tls", false, "启用HTTPS (需通过 -cert/-keyfile 指定证书与私钥路径)")
+	certFile = flag.String("cert", "", "TLS证书文件路径 (PEM格式，-tls=true时必需)")
+	keyFile = flag.String("keyfile", "", "TLS私钥文件路径 (PEM格式，-tls=true时必需)")
 }
 
 func main() {
@@ -40,6 +48,17 @@ func main() {
 	fmt.Printf("Shell路径: %s\n", *shellPath)
 	fmt.Printf("监听端口: %s\n", *port)
 
+	// 校验TLS参数
+	if *useTLS {
+		if *certFile == "" || *keyFile == "" {
+			log.Fatal("错误: 启用HTTPS(-tls=true)时必须同时指定 -cert 证书路径与 -keyfile 私钥路径")
+		}
+		if err := validateCertFiles(*certFile, *keyFile); err != nil {
+			log.Fatalf("错误: TLS证书/私钥无效: %v", err)
+		}
+		fmt.Printf("已启用HTTPS: 证书=%s 私钥=%s\n", *certFile, *keyFile)
+	}
+
 	// 设置Gin为发布模式
 	gin.SetMode(gin.ReleaseMode)
 
@@ -50,6 +69,29 @@ func main() {
 	route.SetupRoutes(r, *password, *shellPath, *port)
 
 	// 启动服务器
+	if *useTLS {
+		fmt.Printf("HTTPS服务器启动在端口 %s\n", *port)
+		log.Fatal(r.RunTLS(":"+*port, *certFile, *keyFile))
+	}
 	fmt.Printf("服务器启动在端口 %s\n", *port)
 	log.Fatal(r.Run(":" + *port))
+}
+
+// validateCertFiles 校验TLS证书/私钥路径存在且能够配对解析（PEM格式）。
+// 使用 crypto/tls 实际加载证书对，可提前发现证书与私钥不匹配、文件损坏等暗病。
+func validateCertFiles(certPath, keyPath string) error {
+	for _, path := range []string{certPath, keyPath} {
+		info, err := os.Stat(path)
+		if err != nil {
+			return fmt.Errorf("%s 不可访问: %v", path, err)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("%s 是目录而非文件", path)
+		}
+	}
+	// 尝试完整解析证书+私钥对，确保两者匹配且为有效 PEM
+	if _, err := tls.LoadX509KeyPair(certPath, keyPath); err != nil {
+		return fmt.Errorf("证书与私钥解析失败(请确认为PEM格式且配对一致): %v", err)
+	}
+	return nil
 }

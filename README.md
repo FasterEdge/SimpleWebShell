@@ -27,6 +27,27 @@
 | -key      | （必填）     | 访问密码                       |
 | -shell    | /bin/bash   | 执行命令所用 shell 路径         |
 | -port     | 8878        | 监听端口                       |
+| -tls      | false       | 启用 HTTPS（需同时指定证书与私钥） |
+| -cert     | （空）       | TLS 证书文件路径（PEM 格式）      |
+| -keyfile  | （空）       | TLS 私钥文件路径（PEM 格式）      |
+
+### 三·一、HTTPS 使用（可选）
+默认以 HTTP 启动；如需 HTTPS，自行准备 PEM 格式证书与私钥后启动：
+
+```bash
+# 生成自签名证书（仅测试用）
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout server.key -out server.crt -days 365 -subj "/CN=your.host"
+
+# 启用 HTTPS
+./SimpleWebShell -key 123456 -tls -cert ./server.crt -keyfile ./server.key -port 8878
+
+# 浏览器访问
+# https://<host>:8878/?key=123456
+```
+
+> 启动时会校验证书与私钥文件存在、格式为 PEM 且配对一致，不匹配将直接报错退出。
+> 生产环境请使用受信任 CA 签发的证书，或在前置反向代理（Nginx/Caddy 等）处终结 TLS。
 
 ### 四、API 一览
 | 接口 | 方法 | 必要参数               | 说明 |
@@ -55,4 +76,4 @@
 
 ### 七、安全提示
 - 仅供合法授权场景（远程运维/边缘计算热更新等），请妥善保管密码并限制网络可达性。
-- 默认未启用HTTPS，如需公网暴露请自行加前置反向代理与访问控制。
+- 支持原生 HTTPS（`-tls` 参数并指定证书/私钥），建议公网暴露时启用；也可在前置反向代理处终结 TLS。

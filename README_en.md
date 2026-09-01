@@ -27,6 +27,27 @@
 | -key     | (required) | Access password                    |
 | -shell   | /bin/bash  | Shell path used to execute commands |
 | -port    | 8878       | Listening port                     |
+| -tls     | false      | Enable HTTPS (cert and key required) |
+| -cert    | (empty)    | TLS certificate file path (PEM)     |
+| -keyfile | (empty)    | TLS private key file path (PEM)     |
+
+### 3.1 HTTPS Usage (Optional)
+The service starts over HTTP by default. To enable HTTPS, provide a PEM certificate and private key:
+
+```bash
+# Generate a self-signed certificate (testing only)
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout server.key -out server.crt -days 365 -subj "/CN=your.host"
+
+# Start with HTTPS
+./SimpleWebShell -key 123456 -tls -cert ./server.crt -keyfile ./server.key -port 8878
+
+# Browser access
+# https://<host>:8878/?key=123456
+```
+
+> At startup the certificate and key files are checked for existence, PEM format and that they match; a mismatch aborts startup with an error.
+> For production, use a certificate issued by a trusted CA, or terminate TLS at a reverse proxy (Nginx/Caddy etc.).
 
 ### 4. API Overview
 | Endpoint | Method | Required Parameters | Description |
@@ -55,4 +76,4 @@
 
 ### 7. Security Notes
 - Intended only for legitimately authorized scenarios (remote operations/edge computing hot updates etc.); keep the password secure and restrict network reachability.
-- HTTPS is not enabled by default; if exposing to the public internet, put a reverse proxy and access control in front.
+- Native HTTPS is supported (`-tls` with cert/key paths); enable it when exposing publicly, or terminate TLS at a reverse proxy.

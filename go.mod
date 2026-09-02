@@ -1,4 +1,4 @@
-module SimpleWebShell
+module github.com/FasterEdge/SimpleWebShell
 
 go 1.25.0
 

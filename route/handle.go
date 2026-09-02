@@ -6,13 +6,13 @@
 package route
 
 import (
-	"SimpleWebShell/pages"
-	"SimpleWebShell/session"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"github.com/FasterEdge/SimpleWebShell/pages"
+	"github.com/FasterEdge/SimpleWebShell/session"
 	"io"
 	"net/http"
 	"os"

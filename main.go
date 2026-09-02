@@ -3,10 +3,10 @@ package main
 
 // https://github.com/FasterEdge/SimpleWebShell
 import (
-	"SimpleWebShell/route"
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"github.com/FasterEdge/SimpleWebShell/route"
 	"log"
 	"os"
 

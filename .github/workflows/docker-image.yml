@@ -11,7 +11,7 @@ jobs:
   docker-build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: 'Go 鍗曞厓娴嬭瘯'
       uses: actions/setup-go@v5
       with:

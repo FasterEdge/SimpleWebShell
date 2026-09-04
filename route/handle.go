@@ -39,7 +39,7 @@ func handleRoot(c *gin.Context) {
 	key := c.Query("key")
 	if !secureCompare(key, password) {
 		// 密钥不正确，只显示基本信息
-		c.String(http.StatusOK, "SimpleWebshell 1.0.20260831 By FasterEdge")
+		c.String(http.StatusOK, "SimpleWebshell 1.0.20260901 By FasterEdge")
 		return
 	}
 

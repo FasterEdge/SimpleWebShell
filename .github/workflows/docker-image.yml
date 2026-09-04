@@ -24,7 +24,7 @@ jobs:
     - name: '导出并上传镜像工件'
       run: |
         docker save simple-web-shell | gzip > simple-web-shell-image.tar.gz
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: 'simple-web-shell-docker-image-${{ github.ref_name }}'
         path: 'simple-web-shell-image.tar.gz'

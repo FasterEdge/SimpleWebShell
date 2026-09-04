@@ -44,7 +44,8 @@ func main() {
 	fmt.Printf("SimpleWebShell %s By FasterEdge\n", version)
 	fmt.Printf("开源官网：https://github.com/FasterEdge\n")
 	fmt.Printf("SimpleWebShell仅用于边缘计算场景中远程操作和热更新，禁止用于非法用途！\n")
-	fmt.Printf("密码已设置为：%s\n", *password)
+	// 不打印密码明文: 容器场景下 stdout 会进入 Docker logs, 明文打印会导致凭据泄露
+	fmt.Printf("密码已设置（长度 %d，已隐藏）\n", len(*password))
 	fmt.Printf("Shell路径: %s\n", *shellPath)
 	fmt.Printf("监听端口: %s\n", *port)
 

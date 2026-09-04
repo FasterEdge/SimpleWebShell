@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -295,6 +296,30 @@ const (
 	shellOutputLimit    = 1 << 20 // 1MiB
 )
 
+// limitedBuffer 只保留前 limit 字节, 后续写入丢弃并计数 (防止巨量输出耗尽内存)
+type limitedBuffer struct {
+	buf      []byte
+	limit    int
+	exceeded bool
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	room := b.limit - len(b.buf)
+	if room > 0 {
+		if len(p) <= room {
+			b.buf = append(b.buf, p...)
+		} else {
+			b.buf = append(b.buf, p[:room]...)
+			b.exceeded = true
+		}
+	} else if len(p) > 0 {
+		b.exceeded = true
+	}
+	return len(p), nil // 返回全量计数, 保持 io.Writer 语义
+}
+
+func (b *limitedBuffer) String() string { return string(b.buf) }
+
 func runShellInDir(cmdStr, dir string) (string, error) {
 	// 根据shell类型选择参数形式
 	shellLower := strings.ToLower(shellPath)
@@ -312,15 +337,23 @@ func runShellInDir(cmdStr, dir string) (string, error) {
 	}
 	cmd.Dir = dir
 
-	output, err := cmd.CombinedOutput()
+	// 受限输出: 最多保留 1MiB, 其余丢弃 (CombinedOutput 会先收集全部输出再截断,
+	// 遇到 yes/cat /dev/zero 等无限输出时内存先被撑爆, 截断形同虚设)
+	buf := &limitedBuffer{limit: shellOutputLimit}
+	cmd.Stdout = buf
+	cmd.Stderr = buf
+
+	err := cmd.Run()
+	var out string
 	if ctx.Err() == context.DeadlineExceeded {
-		return string(output) + "\n[SimpleWebShell] 命令超时(60s)已终止", err
+		out = buf.String() + "\n[SimpleWebShell] 命令超时(60s)已终止"
+	} else {
+		out = buf.String()
+		if buf.exceeded {
+			out += "\n[SimpleWebShell] 输出超过 1MiB 已截断"
+		}
 	}
-	if len(output) > shellOutputLimit {
-		output = output[:shellOutputLimit]
-		return string(output) + "\n[SimpleWebShell] 输出超过 1MiB 已截断", err
-	}
-	return string(output), err
+	return out, err
 }
 
 // 处理文件上传
@@ -350,6 +383,15 @@ func handleFileSend(c *gin.Context) {
 	}
 	var pending []pendingFile
 	var savedFiles []string
+	// 单次上传总大小上限: 默认 2GiB, 可用环境变量 MAX_UPLOAD_SIZE(字节) 覆盖,
+	// 防止异常/恶意客户端无限上传耗尽磁盘 (边缘设备磁盘通常有限)
+	maxUpload := int64(2 << 30)
+	if v := os.Getenv("MAX_UPLOAD_SIZE"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			maxUpload = n
+		}
+	}
+	var totalWritten int64
 	// cleanup 清理临时文件与已写入的目标文件
 	cleanup := func() {
 		for _, pf := range pending {
@@ -380,10 +422,16 @@ func handleFileSend(c *gin.Context) {
 		}
 
 		if part.FileName() == "" {
-			// 普通表单字段，读取内容
+			// 普通表单字段, 限制大小: 多读 1 字节探测是否超限, 超限明确拒绝而非静默截断
+			const maxFieldBytes = 64 << 10
 			name := part.FormName()
-			data, _ := io.ReadAll(part)
+			data, _ := io.ReadAll(io.LimitReader(part, maxFieldBytes+1))
 			_ = part.Close()
+			if len(data) > maxFieldBytes {
+				cleanup()
+				c.String(http.StatusRequestEntityTooLarge, fmt.Sprintf("表单字段 %s 超过大小上限 %d 字节", name, maxFieldBytes))
+				return
+			}
 			val := strings.TrimSpace(string(data))
 			if name == "path" {
 				destPath = val
@@ -415,6 +463,15 @@ func handleFileSend(c *gin.Context) {
 
 			n, rerr := part.Read(buf)
 			if n > 0 {
+				totalWritten += int64(n)
+				if totalWritten > maxUpload {
+					_ = tmp.Close()
+					_ = os.Remove(tmp.Name())
+					cleanup()
+					c.String(http.StatusRequestEntityTooLarge,
+						fmt.Sprintf("上传超过大小上限 %d 字节", maxUpload))
+					return
+				}
 				if _, werr := tmp.Write(buf[:n]); werr != nil {
 					_ = tmp.Close()
 					_ = os.Remove(tmp.Name())
@@ -461,12 +518,20 @@ func handleFileSend(c *gin.Context) {
 			_ = os.MkdirAll(dir, 0755)
 		}
 
+		// 仅当目标是"本次新建"(覆盖前不存在)时才登记进 savedFiles:
+		// cleanup 只应删除本次上传产生的文件; 若覆盖了已有文件而后续某文件失败,
+		// 删除它会导致"旧内容已被覆盖, 新内容又被删"的双重数据丢失
+		_, statErr := os.Stat(outPath)
+		existedBefore := statErr == nil
+
 		if err := moveFile(pf.tmpPath, outPath); err != nil {
 			cleanup()
 			c.String(http.StatusInternalServerError, fmt.Sprintf("保存文件失败: %v", err))
 			return
 		}
-		savedFiles = append(savedFiles, outPath)
+		if !existedBefore {
+			savedFiles = append(savedFiles, outPath)
+		}
 	}
 
 	// 上传完成
@@ -535,6 +600,12 @@ func handleFileReceive(c *gin.Context) {
 	fi, err := f.Stat()
 	if err != nil {
 		c.String(http.StatusInternalServerError, fmt.Sprintf("获取文件信息失败: %v", err))
+		return
+	}
+	// 目录不可下载: Linux 下 open 目录成功但 Read 返回 EISDIR, 会以 200+空 body 结束,
+	// 前端无法区分空文件与失败; 显式拒绝
+	if fi.IsDir() {
+		c.String(http.StatusBadRequest, fmt.Sprintf("路径是目录: %s", filePath))
 		return
 	}
 

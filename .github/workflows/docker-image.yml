@@ -12,6 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - name: 'Go 鍗曞厓娴嬭瘯'
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+    - name: '杩愯娴嬭瘯'
+      run: go test ./...
     - name: '构建 Docker 镜像'
       run: |
         docker build -t simple-web-shell .

@@ -18,3 +18,13 @@ updates:
     labels:
       - dependencies
       - security
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - security

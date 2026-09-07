@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # 多阶段构建：golang 编译 → alpine 精简运行镜像（约 10MB）
-FROM golang:1.25-alpine AS build
+FROM golang:1.27-alpine AS build
 # 通过 goproxy.cn 拉取依赖, 避免在无外网代理环境(如国内网络/受限内网)构建超时
 ENV GOPROXY=https://goproxy.cn,direct
 WORKDIR /src

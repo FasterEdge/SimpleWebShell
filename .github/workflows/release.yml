@@ -40,7 +40,7 @@ jobs:
         else
           tar czf ../simple-web-shell-${{ matrix.target }}.tar.gz simple-web-shell
         fi
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: 'simple-web-shell-${{ matrix.target }}'
         path: '${{ github.workspace }}/simple-web-shell-${{ matrix.target }}.*'

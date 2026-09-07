@@ -24,7 +24,7 @@ jobs:
           - { target: windows-arm64, goos: windows, goarch: arm64, ext: .exe }
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with:
         go-version: '1.25'
     - name: '编译 ${{ matrix.target }}'

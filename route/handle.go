@@ -249,9 +249,12 @@ func executeCommandWithSession(sessID, cmdStr string) (string, error) {
 	// 仅当命令以 "cd" 作为独立词开头时才走会话内目录切换，
 	// 避免把 cdecl、cdrecord 等以 cd 开头的命令误判为目录切换
 	if trim == "cd" || strings.HasPrefix(trim, "cd ") || strings.HasPrefix(trim, "cd\t") {
-		parts := strings.SplitN(cmdStr, "&&", 2)
-		first := strings.TrimSpace(parts[0])
+		// 引号感知分割: cd "a&&b" 中的 && 在引号内, 不应被当作命令分隔符
+		head, rest, hasRest := splitOnAnd(cmdStr)
+		first := strings.TrimSpace(head)
 		target := strings.TrimSpace(strings.TrimPrefix(first, "cd"))
+		// 剥掉包裹引号, 支持 cd "my dir" / cd 'my dir'(否则 Stat 会拿带引号字面量路径失败)
+		target = stripQuotes(target)
 		if target == "" {
 			target = homeDir()
 		}
@@ -270,8 +273,8 @@ func executeCommandWithSession(sessID, cmdStr string) (string, error) {
 			return fmt.Sprintf("cd: %s: no such directory", target), nil
 		}
 
-		if len(parts) == 2 {
-			rest := strings.TrimSpace(parts[1])
+		if hasRest {
+			rest = strings.TrimSpace(rest)
 			return runShellInDir(rest, session.MustGetDir(sessID))
 		}
 		return fmt.Sprintf("changed directory to %s", session.MustGetDir(sessID)), nil
@@ -286,6 +289,36 @@ func homeDir() string {
 		return h
 	}
 	return os.Getenv("HOME")
+}
+
+// splitOnAnd 在引号外切分第一个 "&&"，返回前后两段与是否找到。
+// 命令如 cd "a&&b" 中的 && 位于引号内, 不应被当作命令分隔符;
+// 用 SplitN 会把引号内的 && 也切断, 导致 cd 目标残缺。
+func splitOnAnd(s string) (head, tail string, found bool) {
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '&' && i+1 < len(s) && s[i+1] == '&':
+			return s[:i], s[i+2:], true
+		}
+	}
+	return s, "", false
+}
+
+// stripQuotes 剥掉整串包裹的成对引号: "dir" / 'dir' -> dir。
+// cd 目标常带引号(含空格目录), 不剥离会导致 os.Stat 拿带引号字面量路径失败。
+func stripQuotes(s string) string {
+	if len(s) >= 2 && (s[0] == '"' || s[0] == '\'') && s[len(s)-1] == s[0] {
+		return s[1 : len(s)-1]
+	}
+	return s
 }
 
 // runShellInDir 在指定目录执行 shell 命令。

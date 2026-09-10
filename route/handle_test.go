@@ -111,3 +111,46 @@ func TestLimitedBufferEmptyWrite(t *testing.T) {
 		t.Fatalf("empty write changed state: exceeded=%v content=%q", b.exceeded, b.String())
 	}
 }
+
+// TestSplitOnAnd 校验只在引号外切分 &&: 引号内的 && 必须保留在段内。
+func TestSplitOnAnd(t *testing.T) {
+	cases := []struct {
+		name      string
+		in        string
+		head, tail string
+		found     bool
+	}{
+		{"no-and", "cd /tmp", "cd /tmp", "", false},
+		{"plain-and", "cd /tmp && ls", "cd /tmp ", " ls", true},
+		{"quoted-and", `cd "a&&b"`, `cd "a&&b"`, "", false},
+		{"single-quoted-and", "cd 'a&&b'", "cd 'a&&b'", "", false},
+		{"and-after-quote", `cd "x" && echo hi`, `cd "x" `, " echo hi", true},
+		{"unbalanced-quote", `cd "x && y`, `cd "x && y`, "", false},
+	}
+	for _, c := range cases {
+		head, tail, found := splitOnAnd(c.in)
+		if head != c.head || tail != c.tail || found != c.found {
+			t.Errorf("%s: splitOnAnd(%q) = (%q, %q, %v), want (%q, %q, %v)",
+				c.name, c.in, head, tail, found, c.head, c.tail, c.found)
+		}
+	}
+}
+
+// TestStripQuotes 校验剥掉成对包裹引号, 其余原样保留。
+func TestStripQuotes(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{`"my dir"`, `my dir`},
+		{`'my dir'`, `my dir`},
+		{`my dir`, `my dir`},
+		{`"d`, `"d`},   // 不配对保留
+		{`d"`, `d"`},
+		{``, ``},
+	}
+	for _, c := range cases {
+		if got := stripQuotes(c.in); got != c.want {
+			t.Errorf("stripQuotes(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

@@ -38,7 +38,7 @@ jobs:
           - { arch: arm64, platform: 'linux/arm64' }
     steps:
       - name: '检出代码'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 'Go 单元测试'
         uses: actions/setup-go@v5

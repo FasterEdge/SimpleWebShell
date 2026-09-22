@@ -1,16 +1,74 @@
-name: '跨平台 Release 打包'
+name: 'Release 打包'
+
+# 触发时机：
+#   1. 用户在 GitHub 上「发布」一个版本（Release published / 从草稿发布）——主路径；
+#   2. 推送 v* 标签；
+#   3. 手动触发（需指定标签）。
+# 产物：六平台可执行文件 tar/zip + linux/amd64、linux/arm64 两个 Docker 镜像 tar 包。
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布/上传的版本标签，例如 v1.0.20260920'
+        required: false
+        type: string
   push:
     tags:
       - 'v*'
+  release:
+    types: [published, released]
 
 permissions:
   contents: write
 
+# 同一标签可能同时被「推标签」和「发布 Release」触发，串行执行避免重复上传
+concurrency:
+  group: 'release-${{ github.workflow }}-${{ github.ref }}'
+  cancel-in-progress: false
+
+env:
+  BIN_NAME: simple-web-shell
+
 jobs:
+  meta:
+    name: '解析发布标签'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.vars.outputs.tag }}
+      publish: ${{ steps.vars.outputs.publish }}
+    steps:
+      - name: '检出代码'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name || github.ref }}
+
+      - id: vars
+        name: '解析标签并校验版本号'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag='${{ inputs.tag || github.event.release.tag_name || github.ref_name }}'
+          publish=false
+          case "$tag" in
+            v*) publish=true ;;
+            *)  publish=false ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "发布标签: ${tag:-<未指定>}"
+          echo "是否发布 Release: $publish"
+          if [ "$publish" = "true" ]; then
+            version="$(grep -oP '(?<=version := ")[^"]+' main.go | head -n1)"
+            echo "源码版本号: ${version}"
+            if [ "$tag" != "v${version}" ]; then
+              echo "::error::发布标签 ${tag} 与源码版本号 v${version} 不一致，请先把 main.go 里的版本号改成 ${tag#v} 再发布。"
+              exit 1
+            fi
+          fi
+
   build:
-    name: '构建 ${{ matrix.target }}'
+    name: '编译打包 ${{ matrix.target }}'
+    needs: meta
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -23,50 +81,141 @@ jobs:
           - { target: windows-amd64, goos: windows, goarch: amd64, ext: .exe }
           - { target: windows-arm64, goos: windows, goarch: arm64, ext: .exe }
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
-      with:
-        go-version: '1.25'
-    - name: '编译 ${{ matrix.target }}'
-      run: |
-        mkdir -p dist
-        CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
-          go build -trimpath -ldflags="-s -w" -o dist/simple-web-shell${{ matrix.ext }} .
-    - name: '打包'
-      run: |
-        cd dist
-        if [ "${{ matrix.goos }}" = "windows" ]; then
-          zip -qr ../simple-web-shell-${{ matrix.target }}.zip simple-web-shell.exe
-        else
-          tar czf ../simple-web-shell-${{ matrix.target }}.tar.gz simple-web-shell
-        fi
-    - uses: actions/upload-artifact@v4
-      with:
-        name: 'simple-web-shell-${{ matrix.target }}'
-        path: '${{ github.workspace }}/simple-web-shell-${{ matrix.target }}.*'
-        if-no-files-found: 'error'
-        retention-days: 1
+      - name: '检出代码'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name || github.ref }}
+
+      - name: '安装 Go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: '单元测试'
+        run: go test ./...
+
+      - name: '静态检查 go vet'
+        run: go vet ./...
+
+      - name: '编译 ${{ matrix.target }}'
+        run: |
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            go build -trimpath -ldflags="-s -w" \
+            -o "$BIN_NAME${{ matrix.ext }}" .
+
+      - name: '打包 tar/zip'
+        run: |
+          set -euo pipefail
+          target='${{ matrix.target }}'
+          bin="$BIN_NAME${{ matrix.ext }}"
+          stage="$BIN_NAME-$target"
+          rm -rf "$stage" && mkdir -p "$stage"
+          cp "$bin" "$stage/"
+          for doc in README.md LICENSE; do
+            [ -f "$doc" ] && cp "$doc" "$stage/"
+          done
+          files=()
+          for f in "$stage"/*; do files+=("${f##*/}"); done
+          if [ '${{ matrix.goos }}' = 'windows' ]; then
+            ( cd "$stage" && zip -qr "../$stage.zip" "${files[@]}" )
+          else
+            tar czf "$stage.tar.gz" -C "$stage" "${files[@]}"
+          fi
+          ls -l "$stage".tar.gz "$stage".zip 2>/dev/null || true
+
+      - name: '上传打包工件'
+        uses: actions/upload-artifact@v4
+        with:
+          name: 'bin-${{ matrix.target }}'
+          path: 'simple-web-shell-${{ matrix.target }}.*'
+          if-no-files-found: 'error'
+          retention-days: 7
+
+  docker:
+    name: '构建 Docker 镜像 ${{ matrix.arch }}'
+    needs: meta
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, platform: 'linux/amd64' }
+          - { arch: arm64, platform: 'linux/arm64' }
+    steps:
+      - name: '检出代码'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name || github.ref }}
+
+      - name: '启用 QEMU（arm64 镜像构建）'
+        uses: docker/setup-qemu-action@v3
+
+      - name: '启用 Buildx'
+        uses: docker/setup-buildx-action@v3
+
+      - name: '构建镜像并导出 tar 包'
+        run: |
+          set -euo pipefail
+          out="$BIN_NAME-image-${{ matrix.arch }}.tar"
+          docker buildx build \
+            --platform ${{ matrix.platform }} \
+            --tag "$BIN_NAME:${{ matrix.arch }}" \
+            --output "type=docker,dest=$out" \
+            .
+          gzip -9 -f "$out"
+
+      - name: '上传镜像工件'
+        uses: actions/upload-artifact@v4
+        with:
+          name: 'docker-image-${{ matrix.arch }}'
+          path: 'simple-web-shell-image-${{ matrix.arch }}.tar.gz'
+          if-no-files-found: 'error'
+          retention-days: 7
 
   release:
     name: '发布 GitHub Release'
-    needs: build
+    needs: [build, docker]
+    if: needs.meta.outputs.publish == 'true'
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/download-artifact@v4
-      with:
-        path: artifacts
-        merge-multiple: true
-    - name: '整理产物'
-      run: |
-        mkdir -p release
-        find artifacts -type f | while read -r f; do
-          case "$f" in
-            *.tar.gz|*.zip) cp "$f" release/ ;;
-          esac
-        done
-    - name: '上传到 Release'
-      uses: softprops/action-gh-release@v2
-      with:
-        files: 'release/*'
-        generate_release_notes: true
-        fail_on_unmatched_files: false
+      - name: '汇总全部产物'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*'
+          path: artifacts
+          merge-multiple: true
+
+      - name: '生成 SHA256/MD5/SHA1 校验文件'
+        run: |
+          set -euo pipefail
+          cd artifacts
+          find . -type f \
+            ! -name 'SHA256SUMS.txt' \
+            ! -name 'checksums-md5.txt' \
+            ! -name 'checksums-sha1.txt' -print0 \
+            | sort -z | xargs -0 -r sha256sum > SHA256SUMS.txt
+          find . -type f \
+            ! -name 'SHA256SUMS.txt' \
+            ! -name 'checksums-md5.txt' \
+            ! -name 'checksums-sha1.txt' -print0 \
+            | sort -z | xargs -0 -r md5sum > checksums-md5.txt
+          find . -type f \
+            ! -name 'SHA256SUMS.txt' \
+            ! -name 'checksums-md5.txt' \
+            ! -name 'checksums-sha1.txt' -print0 \
+            | sort -z | xargs -0 -r sha1sum > checksums-sha1.txt
+          cat SHA256SUMS.txt checksums-md5.txt checksums-sha1.txt
+
+      - name: '上传到 Release'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: ${{ needs.meta.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+            artifacts/SHA256SUMS.txt
+            artifacts/checksums-md5.txt
+            artifacts/checksums-sha1.txt
+          fail_on_unmatched_files: true

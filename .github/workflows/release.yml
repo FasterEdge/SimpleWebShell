@@ -124,7 +124,7 @@ jobs:
           ls -l "$stage".tar.gz "$stage".zip 2>/dev/null || true
 
       - name: '上传打包工件'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: 'bin-${{ matrix.target }}'
           path: 'simple-web-shell-${{ matrix.target }}.*'
@@ -165,7 +165,7 @@ jobs:
           gzip -9 -f "$out"
 
       - name: '上传镜像工件'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: 'docker-image-${{ matrix.arch }}'
           path: 'simple-web-shell-image-${{ matrix.arch }}.tar.gz'

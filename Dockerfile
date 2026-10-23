@@ -7,7 +7,7 @@ WORKDIR /src
 COPY . .
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/app .
 
-FROM alpine:3.20
+FROM alpine:3.24
 # 应用默认 shell 为 /bin/bash, alpine 基础镜像不带 bash, 缺失会导致
 # 所有 /post 命令执行返回 "fork/exec /bin/bash: no such file" (HTTP 500)。
 RUN apk add --no-cache bash \

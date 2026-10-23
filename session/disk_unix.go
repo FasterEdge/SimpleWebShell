@@ -14,7 +14,7 @@ import "syscall"
 func detectDiskMB(path string) int64 {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(path, &st); err == nil {
-		total := uint64(st.Blocks) * uint64(st.Bsize)
+		total := st.Blocks * uint64(st.Bsize)
 		return int64(total / 1024 / 1024)
 	}
 	return 0

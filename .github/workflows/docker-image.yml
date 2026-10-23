@@ -43,7 +43,7 @@ jobs:
       - name: 'Go 单元测试'
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.26'
 
       - name: '运行测试'
         run: go test ./...

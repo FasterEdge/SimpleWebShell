@@ -52,7 +52,7 @@ jobs:
         run: go vet ./...
 
       - name: '启用 QEMU（arm64 镜像构建）'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: '启用 Buildx'
         uses: docker/setup-buildx-action@v3

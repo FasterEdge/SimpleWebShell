@@ -151,7 +151,7 @@ jobs:
         uses: docker/setup-qemu-action@v3
 
       - name: '启用 Buildx'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: '构建镜像并导出 tar 包'
         run: |
